@@ -45,27 +45,37 @@ class DelayStudyApp:
         input_frame = ttk.LabelFrame(root, text="Vehicle Count Data Entry")
         input_frame.pack(fill="x", padx=10, pady=5)
 
-        # Time and Direction inputs
+        # Study Period and Time inputs
         time_dir_frame = ttk.Frame(input_frame)
         time_dir_frame.pack(fill="x", padx=5, pady=5)
 
-        time_label = ttk.Label(time_dir_frame, text="Starting Time (Min):")
-        time_label.pack(side="left", padx=5)
+        # 15-minute period selection
+        period_label = ttk.Label(time_dir_frame, text="15-Min Period:")
+        period_label.pack(side="left", padx=5)
+        self.period_var = tk.StringVar(value="1")
+        self.period_combo = ttk.Combobox(time_dir_frame, textvariable=self.period_var,
+                                        values=["1 (0-15 min)", "2 (15-30 min)", "3 (30-45 min)", "4 (45-60 min)"], 
+                                        width=15, state="readonly")
+        self.period_combo.pack(side="left", padx=5)
+
+        # Current minute within period
+        minute_label = ttk.Label(time_dir_frame, text="Minute in Period:")
+        minute_label.pack(side="left", padx=5)
         self.minute_var = tk.StringVar(value="0")
-        self.minute_entry = ttk.Entry(time_dir_frame, textvariable=self.minute_var, width=8)
+        self.minute_entry = ttk.Entry(time_dir_frame, textvariable=self.minute_var, width=8, state="readonly")
         self.minute_entry.pack(side="left", padx=5)
 
-        # Add time conversion helper label
-        time_helper_label = ttk.Label(time_dir_frame, 
-            text="(e.g., 8:00 AM = 0, 8:15 AM = 15, 8:30 AM = 30)")
-        time_helper_label.pack(side="left", padx=5)
-
+        # Direction selection
         direction_label = ttk.Label(time_dir_frame, text="Direction:")
         direction_label.pack(side="left", padx=5)
         self.direction_var = tk.StringVar(value="North")
         self.direction_combo = ttk.Combobox(time_dir_frame, textvariable=self.direction_var,
-                                          values=["North", "South", "East", "West"], width=10)
+                                          values=["North", "South", "East", "West"], width=10, state="readonly")
         self.direction_combo.pack(side="left", padx=5)
+
+        # Auto-progress button
+        self.progress_button = ttk.Button(time_dir_frame, text="Next Minute", command=self.next_minute)
+        self.progress_button.pack(side="left", padx=5)
 
         # Stopped vehicle counts frame
         stopped_frame = ttk.LabelFrame(input_frame, text="Vehicles Stopped at Each Interval")
@@ -138,7 +148,7 @@ class DelayStudyApp:
         # Configure treeview
         self.tree = ttk.Treeview(table_frame, 
             columns=(
-                "minute", "direction", 
+                "period", "minute", "direction", 
                 "stopped_0", "stopped_15", "stopped_30", "stopped_45", "total_stopped",
                 "notstopped_0", "notstopped_15", "notstopped_30", "notstopped_45", "total_notstopped",
                 "total"
@@ -148,6 +158,7 @@ class DelayStudyApp:
         
         # Configure headers and columns
         headers = {
+            "period": "Period",
             "minute": "Minute",
             "direction": "Direction",
             "stopped_0": "Stopped +0s",
@@ -202,8 +213,24 @@ class DelayStudyApp:
         for var in self.notstopped_vars:
             var.set("0")
 
+    def next_minute(self):
+        """Automatically progress to the next minute within the current period."""
+        current_minute = int(self.minute_var.get())
+        if current_minute < 14:  # 0-14 minutes in each 15-minute period
+            self.minute_var.set(str(current_minute + 1))
+        else:
+            # Move to next period
+            current_period = int(self.period_var.get().split()[0])
+            if current_period < 4:
+                next_period = current_period + 1
+                self.period_var.set(f"{next_period} ({15*(next_period-1)}-{15*next_period} min)")
+                self.minute_var.set("0")
+            else:
+                messagebox.showinfo("Study Complete", "All 4 periods (60 minutes) have been completed!")
+
     def add_entry(self):
         try:
+            period = int(self.period_var.get().split()[0])
             minute = int(self.minute_var.get())
             direction = self.direction_var.get()
             
@@ -217,9 +244,9 @@ class DelayStudyApp:
             
             total = total_stopped + total_notstopped
             
-            # Create data tuple with all values
+            # Create data tuple with all values including period
             entry_data = (
-                minute, direction, 
+                period, minute, direction, 
                 *stopped_counts, total_stopped,
                 *notstopped_counts, total_notstopped,
                 total
@@ -229,8 +256,8 @@ class DelayStudyApp:
             # Add to treeview
             self.tree.insert("", "end", values=entry_data)
 
-            # Increment minute and reset counts
-            self.minute_var.set(str(minute + 1))
+            # Auto-progress to next minute and reset counts
+            self.next_minute()
             self.reset_counts()
             
         except ValueError:
@@ -241,12 +268,41 @@ class DelayStudyApp:
             messagebox.showwarning("No Data", "Please add some entries first.")
             return
 
-        results_by_direction = {}
+        # Calculate results by period and direction
+        results_by_period_direction = {}
+        overall_results_by_direction = {}
+        
+        for period in range(1, 5):
+            results_by_period_direction[period] = {}
+            for direction in ["North", "South", "East", "West"]:
+                # Filter data for this period and direction (period is now index 0, direction is index 2)
+                period_direction_data = [d for d in self.data if d[0] == period and d[2] == direction]
+                if period_direction_data:
+                    total_stopped = sum(d[7] for d in period_direction_data)  # Index 7 is total_stopped
+                    total_notstopped = sum(d[12] for d in period_direction_data)  # Index 12 is total_notstopped
+                    total_vehicles = total_stopped + total_notstopped
+                    
+                    if total_vehicles > 0:
+                        total_delay = total_stopped * 15  # Total Delay formula
+                        avg_delay_stopped = total_delay / total_stopped if total_stopped > 0 else 0
+                        avg_delay_approach = total_delay / total_vehicles
+                        percent_stopped = (total_stopped / total_vehicles) * 100
+                        
+                        results_by_period_direction[period][direction] = {
+                            "Total Vehicles": total_vehicles,
+                            "Total Stopped": total_stopped,
+                            "Total Delay (sec)": total_delay,
+                            "Avg Delay per Stopped (sec)": avg_delay_stopped,
+                            "Avg Delay per Approach (sec)": avg_delay_approach,
+                            "Percent Stopped": percent_stopped
+                        }
+        
+        # Calculate overall results by direction
         for direction in ["North", "South", "East", "West"]:
-            direction_data = [d for d in self.data if d[1] == direction]
+            direction_data = [d for d in self.data if d[2] == direction]
             if direction_data:
-                total_stopped = sum(d[6] for d in direction_data)  # Index 6 is total_stopped
-                total_notstopped = sum(d[11] for d in direction_data)  # Index 11 is total_notstopped
+                total_stopped = sum(d[7] for d in direction_data)  # Index 7 is total_stopped
+                total_notstopped = sum(d[12] for d in direction_data)  # Index 12 is total_notstopped
                 total_vehicles = total_stopped + total_notstopped
                 
                 if total_vehicles > 0:
@@ -255,7 +311,7 @@ class DelayStudyApp:
                     avg_delay_approach = total_delay / total_vehicles
                     percent_stopped = (total_stopped / total_vehicles) * 100
                     
-                    results_by_direction[direction] = {
+                    overall_results_by_direction[direction] = {
                         "Total Vehicles": total_vehicles,
                         "Total Stopped": total_stopped,
                         "Total Delay (sec)": total_delay,
@@ -271,15 +327,27 @@ class DelayStudyApp:
                 initialfile="Intersection_Delay_Results.xlsx"
             )
             if filename:
-                # Create DataFrame for results
-                results_data = []
-                for direction, data in results_by_direction.items():
-                    results_data.append({
+                # Create DataFrame for overall results
+                overall_results_data = []
+                for direction, data in overall_results_by_direction.items():
+                    overall_results_data.append({
                         "Direction": direction,
                         **data
                     })
                 
-                df = pd.DataFrame(results_data)
+                overall_df = pd.DataFrame(overall_results_data)
+                
+                # Create DataFrame for period-by-period results
+                period_results_data = []
+                for period in range(1, 5):
+                    for direction, data in results_by_period_direction[period].items():
+                        period_results_data.append({
+                            "Period": period,
+                            "Direction": direction,
+                            **data
+                        })
+                
+                period_df = pd.DataFrame(period_results_data)
                 
                 # Write to Excel with proper formatting
                 with pd.ExcelWriter(filename, engine='openpyxl') as writer:
@@ -291,28 +359,38 @@ class DelayStudyApp:
                         ["Weather:", self.weather_var.get()],
                         [""]
                     ])
-                    info_df.to_excel(writer, sheet_name='Results', index=False, header=False)
+                    info_df.to_excel(writer, sheet_name='Overall Results', index=False, header=False)
                     
-                    # Write results data
-                    df.to_excel(writer, sheet_name='Results', index=False, startrow=len(info_df))
+                    # Write overall results data
+                    overall_df.to_excel(writer, sheet_name='Overall Results', index=False, startrow=len(info_df))
+                    
+                    # Write period-by-period results to separate sheet
+                    period_df.to_excel(writer, sheet_name='Period Results', index=False)
                     
                     # Auto-adjust columns width
-                    worksheet = writer.sheets['Results']
-                    for idx, col in enumerate(df.columns):
-                        worksheet.column_dimensions[chr(65 + idx)].width = 20
+                    for sheet_name in ['Overall Results', 'Period Results']:
+                        worksheet = writer.sheets[sheet_name]
+                        if sheet_name == 'Overall Results':
+                            df_to_adjust = overall_df
+                        else:
+                            df_to_adjust = period_df
+                        for idx, col in enumerate(df_to_adjust.columns):
+                            worksheet.column_dimensions[chr(65 + idx)].width = 20
 
                 messagebox.showinfo("Success", f"Results saved to {filename}")
-                self.show_results_popup(results_by_direction)
+                self.show_results_popup(overall_results_by_direction, results_by_period_direction)
                 
         except Exception as e:
             messagebox.showerror("Error", f"Error saving results: {str(e)}")
 
-    def show_results_popup(self, results_by_direction):
+    def show_results_popup(self, overall_results_by_direction, results_by_period_direction):
         results = f"Intersection: {self.intersection_var.get()}\n"
         results += f"Date: {self.date_var.get()}\n"
         results += f"Weather: {self.weather_var.get()}\n\n"
         
-        for direction, data in results_by_direction.items():
+        # Overall Results
+        results += "=== OVERALL STUDY RESULTS ===\n"
+        for direction, data in overall_results_by_direction.items():
             results += f"\n{direction} Approach:\n"
             results += f"Total Vehicles: {data['Total Vehicles']}\n"
             results += f"Total Stopped: {data['Total Stopped']}\n"
@@ -320,6 +398,15 @@ class DelayStudyApp:
             results += f"Avg Delay per Stopped Vehicle: {data['Avg Delay per Stopped (sec)']:.1f} seconds\n"
             results += f"Avg Delay per Approach Vehicle: {data['Avg Delay per Approach (sec)']:.1f} seconds\n"
             results += f"Percent Stopped: {data['Percent Stopped']:.1f}%\n"
+        
+        # Period-by-Period Results
+        results += "\n\n=== PERIOD-BY-PERIOD RESULTS ===\n"
+        for period in range(1, 5):
+            results += f"\nPeriod {period} ({15*(period-1)}-{15*period} minutes):\n"
+            for direction, data in results_by_period_direction[period].items():
+                results += f"  {direction}: {data['Total Vehicles']} vehicles, "
+                results += f"{data['Total Stopped']} stopped, "
+                results += f"{data['Avg Delay per Approach (sec)']:.1f}s avg delay\n"
 
         messagebox.showinfo("Delay Study Results", results)
 
@@ -336,7 +423,7 @@ class DelayStudyApp:
             if filename:
                 # Create DataFrame from collected data
                 columns = [
-                    "Minute", "Direction",
+                    "Period", "Minute", "Direction",
                     "Stopped +0s", "Stopped +15s", "Stopped +30s", "Stopped +45s", "Total Stopped",
                     "Not Stopped +0s", "Not Stopped +15s", "Not Stopped +30s", "Not Stopped +45s",
                     "Total Not Stopped", "Total Volume"
@@ -391,6 +478,7 @@ class DelayStudyApp:
             self.data.clear()
             for row in self.tree.get_children():
                 self.tree.delete(row)
+            self.period_var.set("1 (0-15 min)")
             self.minute_var.set("0")
             self.reset_counts()
 

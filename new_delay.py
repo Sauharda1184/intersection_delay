@@ -187,6 +187,8 @@ class DelayStudyApp:
         
         ttk.Button(action_frame, text="Calculate Results", 
                   command=self.calculate_results).pack(side="left", padx=5)
+        ttk.Button(action_frame, text="Generate Form 2", 
+                  command=self.generate_form2).pack(side="left", padx=5)
         ttk.Button(action_frame, text="Save Data", 
                   command=self.save_data).pack(side="left", padx=5)
         ttk.Button(action_frame, text="Clear All Data", 
@@ -481,6 +483,289 @@ class DelayStudyApp:
             self.period_var.set("1 (0-15 min)")
             self.minute_var.set("0")
             self.reset_counts()
+
+    def generate_form2(self):
+        """Generate Form 2 with aggregated 15-minute period data."""
+        if not self.data:
+            messagebox.showwarning("No Data", "Please collect some data first.")
+            return
+        
+        # Create Form 2 window
+        form2_window = Form2Window(self.root, self.data, self.date_var.get(), 
+                                  self.intersection_var.get(), self.weather_var.get())
+
+class Form2Window:
+    def __init__(self, parent, data, date, intersection, weather):
+        self.data = data
+        self.date = date
+        self.intersection = intersection
+        self.weather = weather
+        
+        # Create new window
+        self.window = tk.Toplevel(parent)
+        self.window.title("Form 2: Intersection Delay Study")
+        self.window.geometry("1000x700")
+        
+        # Study Information Frame
+        info_frame = ttk.LabelFrame(self.window, text="Study Information")
+        info_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Study details
+        self.location_var = tk.StringVar(value=intersection)
+        self.approach_var = tk.StringVar(value="All Approaches")
+        self.movement_var = tk.StringVar(value="All Movements")
+        self.lanes_var = tk.StringVar(value="All Lanes")
+        self.delay_observer_var = tk.StringVar()
+        self.count_observer_var = tk.StringVar()
+        self.recorder_var = tk.StringVar()
+        
+        # Peak hour times
+        self.begin_hour_var = tk.StringVar(value="8")
+        self.begin_minute_var = tk.StringVar(value="00")
+        self.end_hour_var = tk.StringVar(value="9")
+        self.end_minute_var = tk.StringVar(value="00")
+        
+        # Layout study information
+        ttk.Label(info_frame, text="Date:").grid(row=0, column=0, padx=5, pady=2, sticky="e")
+        ttk.Label(info_frame, text=date).grid(row=0, column=1, padx=5, pady=2, sticky="w")
+        
+        ttk.Label(info_frame, text="Location:").grid(row=0, column=2, padx=5, pady=2, sticky="e")
+        ttk.Entry(info_frame, textvariable=self.location_var, width=20).grid(row=0, column=3, padx=5, pady=2, sticky="w")
+        
+        ttk.Label(info_frame, text="Approach:").grid(row=1, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(info_frame, textvariable=self.approach_var, width=20).grid(row=1, column=1, padx=5, pady=2, sticky="w")
+        
+        ttk.Label(info_frame, text="Movement(s):").grid(row=1, column=2, padx=5, pady=2, sticky="e")
+        ttk.Entry(info_frame, textvariable=self.movement_var, width=20).grid(row=1, column=3, padx=5, pady=2, sticky="w")
+        
+        ttk.Label(info_frame, text="Lanes:").grid(row=2, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(info_frame, textvariable=self.lanes_var, width=20).grid(row=2, column=1, padx=5, pady=2, sticky="w")
+        
+        ttk.Label(info_frame, text="Weather:").grid(row=2, column=2, padx=5, pady=2, sticky="e")
+        ttk.Label(info_frame, text=weather).grid(row=2, column=3, padx=5, pady=2, sticky="w")
+        
+        # Peak hour
+        ttk.Label(info_frame, text="Peak Hour:").grid(row=3, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(info_frame, textvariable=self.begin_hour_var, width=3).grid(row=3, column=1, padx=2, pady=2, sticky="w")
+        ttk.Label(info_frame, text=":").grid(row=3, column=2, padx=0, pady=2)
+        ttk.Entry(info_frame, textvariable=self.begin_minute_var, width=3).grid(row=3, column=3, padx=2, pady=2, sticky="w")
+        ttk.Label(info_frame, text="to").grid(row=3, column=4, padx=5, pady=2)
+        ttk.Entry(info_frame, textvariable=self.end_hour_var, width=3).grid(row=3, column=5, padx=2, pady=2, sticky="w")
+        ttk.Label(info_frame, text=":").grid(row=3, column=6, padx=0, pady=2)
+        ttk.Entry(info_frame, textvariable=self.end_minute_var, width=3).grid(row=3, column=7, padx=2, pady=2, sticky="w")
+        
+        # Observers
+        ttk.Label(info_frame, text="Delay Observer:").grid(row=4, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(info_frame, textvariable=self.delay_observer_var, width=20).grid(row=4, column=1, padx=5, pady=2, sticky="w")
+        
+        ttk.Label(info_frame, text="Count Observer:").grid(row=4, column=2, padx=5, pady=2, sticky="e")
+        ttk.Entry(info_frame, textvariable=self.count_observer_var, width=20).grid(row=4, column=3, padx=5, pady=2, sticky="w")
+        
+        ttk.Label(info_frame, text="Recorder:").grid(row=5, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(info_frame, textvariable=self.recorder_var, width=20).grid(row=5, column=1, padx=5, pady=2, sticky="w")
+        
+        # Form 2 Data Table
+        table_frame = ttk.LabelFrame(self.window, text="Form 2: 15-Minute Period Data")
+        table_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Create scrollbar
+        scrollbar = ttk.Scrollbar(table_frame)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Create treeview for Form 2 data
+        self.form2_tree = ttk.Treeview(table_frame, 
+            columns=("period", "time_range", "direction", "total_stopped", "total_notstopped", "total_volume"),
+            show="headings",
+            yscrollcommand=scrollbar.set)
+        
+        # Configure headers
+        headers = {
+            "period": "Period",
+            "time_range": "Time Range",
+            "direction": "Direction",
+            "total_stopped": "Total Stopped",
+            "total_notstopped": "Total Not Stopped", 
+            "total_volume": "Total Volume"
+        }
+        
+        for col, heading in headers.items():
+            self.form2_tree.heading(col, text=heading)
+            self.form2_tree.column(col, width=120)
+        
+        self.form2_tree.pack(fill="both", expand=True, side="left")
+        scrollbar.config(command=self.form2_tree.yview)
+        
+        # Populate Form 2 data
+        self.populate_form2_data()
+        
+        # Calculated Results Frame
+        results_frame = ttk.LabelFrame(self.window, text="Calculated Results")
+        results_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Results display
+        self.results_text = tk.Text(results_frame, height=8, wrap="word")
+        results_scrollbar = ttk.Scrollbar(results_frame, orient="vertical", command=self.results_text.yview)
+        self.results_text.configure(yscrollcommand=results_scrollbar.set)
+        
+        self.results_text.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        results_scrollbar.pack(side="right", fill="y", pady=5)
+        
+        # Calculate and display results
+        self.calculate_form2_results()
+        
+        # Action buttons
+        button_frame = ttk.Frame(self.window)
+        button_frame.pack(fill="x", padx=10, pady=5)
+        
+        ttk.Button(button_frame, text="Export Form 2", 
+                  command=self.export_form2).pack(side="left", padx=5)
+        ttk.Button(button_frame, text="Close", 
+                  command=self.window.destroy).pack(side="right", padx=5)
+
+    def populate_form2_data(self):
+        """Populate Form 2 table with aggregated 15-minute period data."""
+        # Aggregate data by period and direction
+        period_data = {}
+        
+        for row in self.data:
+            period = row[0]  # Period number
+            direction = row[2]  # Direction
+            total_stopped = row[7]  # Total stopped
+            total_notstopped = row[12]  # Total not stopped
+            
+            if period not in period_data:
+                period_data[period] = {}
+            if direction not in period_data[period]:
+                period_data[period][direction] = {"stopped": 0, "notstopped": 0}
+            
+            period_data[period][direction]["stopped"] += total_stopped
+            period_data[period][direction]["notstopped"] += total_notstopped
+        
+        # Populate treeview
+        for period in sorted(period_data.keys()):
+            time_range = f"{15*(period-1):02d}:00-{15*period:02d}:00"
+            for direction in ["North", "South", "East", "West"]:
+                if direction in period_data[period]:
+                    stopped = period_data[period][direction]["stopped"]
+                    notstopped = period_data[period][direction]["notstopped"]
+                    total = stopped + notstopped
+                    
+                    self.form2_tree.insert("", "end", values=(
+                        period, time_range, direction, stopped, notstopped, total
+                    ))
+
+    def calculate_form2_results(self):
+        """Calculate and display Form 2 results."""
+        # Aggregate all data
+        total_stopped = sum(row[7] for row in self.data)
+        total_notstopped = sum(row[12] for row in self.data)
+        total_vehicles = total_stopped + total_notstopped
+        
+        # Calculate metrics
+        total_delay_seconds = total_stopped * 15  # Each stopped vehicle = 15 seconds delay
+        total_delay_hours = total_delay_seconds / 3600
+        avg_delay_stopped = total_delay_seconds / total_stopped if total_stopped > 0 else 0
+        avg_delay_approach = total_delay_seconds / total_vehicles if total_vehicles > 0 else 0
+        percent_stopped = (total_stopped / total_vehicles * 100) if total_vehicles > 0 else 0
+        
+        # Format results
+        results = f"""FORM 2 CALCULATED RESULTS
+{'='*50}
+
+Total Delay: {total_delay_seconds} vehicle-seconds
+Total Delay: {total_delay_hours:.2f} vehicle-hours
+Average Delay per Stopped Vehicle: {avg_delay_stopped:.2f} vehicle-seconds/vehicle
+Average Delay per Approach Vehicle: {avg_delay_approach:.2f} vehicle-seconds/vehicle
+Percent of Vehicles Stopped: {percent_stopped:.2f}%
+
+STUDY SUMMARY
+{'='*50}
+Total Vehicles Observed: {total_vehicles}
+Total Vehicles Stopped: {total_stopped}
+Total Vehicles Not Stopped: {total_notstopped}
+Study Duration: 60 minutes (4 x 15-minute periods)
+Sampling Interval: 15 seconds
+
+PERIOD BREAKDOWN
+{'='*50}"""
+        
+        # Add period-by-period breakdown
+        period_data = {}
+        for row in self.data:
+            period = row[0]
+            if period not in period_data:
+                period_data[period] = {"stopped": 0, "notstopped": 0}
+            period_data[period]["stopped"] += row[7]
+            period_data[period]["notstopped"] += row[12]
+        
+        for period in sorted(period_data.keys()):
+            stopped = period_data[period]["stopped"]
+            notstopped = period_data[period]["notstopped"]
+            total = stopped + notstopped
+            period_delay = stopped * 15
+            period_avg_delay = period_delay / total if total > 0 else 0
+            
+            results += f"""
+Period {period} ({15*(period-1):02d}:00-{15*period:02d}:00):
+  Total Vehicles: {total}
+  Stopped: {stopped}
+  Not Stopped: {notstopped}
+  Total Delay: {period_delay} vehicle-seconds
+  Average Delay: {period_avg_delay:.2f} seconds/vehicle"""
+        
+        self.results_text.insert("1.0", results)
+        self.results_text.config(state="disabled")
+
+    def export_form2(self):
+        """Export Form 2 to Excel file."""
+        try:
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                initialfile="Form2_Intersection_Delay_Study.xlsx"
+            )
+            if filename:
+                # Prepare Form 2 data
+                form2_data = []
+                for item in self.form2_tree.get_children():
+                    values = self.form2_tree.item(item)["values"]
+                    form2_data.append(values)
+                
+                # Create DataFrame
+                columns = ["Period", "Time Range", "Direction", "Total Stopped", "Total Not Stopped", "Total Volume"]
+                df = pd.DataFrame(form2_data, columns=columns)
+                
+                # Write to Excel
+                with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                    # Study information
+                    info_df = pd.DataFrame([
+                        ["Form 2: Intersection Delay Study"],
+                        ["Date:", self.date],
+                        ["Location:", self.location_var.get()],
+                        ["Approach:", self.approach_var.get()],
+                        ["Movement(s):", self.movement_var.get()],
+                        ["Lanes:", self.lanes_var.get()],
+                        ["Weather:", self.weather],
+                        ["Peak Hour:", f"{self.begin_hour_var.get()}:{self.begin_minute_var.get()} - {self.end_hour_var.get()}:{self.end_minute_var.get()}"],
+                        ["Delay Observer:", self.delay_observer_var.get()],
+                        ["Count Observer:", self.count_observer_var.get()],
+                        ["Recorder:", self.recorder_var.get()],
+                        [""]
+                    ])
+                    info_df.to_excel(writer, sheet_name='Form2', index=False, header=False)
+                    
+                    # Form 2 data
+                    df.to_excel(writer, sheet_name='Form2', index=False, startrow=len(info_df))
+                    
+                    # Auto-adjust columns
+                    worksheet = writer.sheets['Form2']
+                    for idx, col in enumerate(df.columns):
+                        worksheet.column_dimensions[chr(65 + idx)].width = 20
+                
+                messagebox.showinfo("Success", f"Form 2 exported to {filename}")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error exporting Form 2: {str(e)}")
 
 if __name__ == "__main__":
     root = tk.Tk()

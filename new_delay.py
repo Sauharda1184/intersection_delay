@@ -272,10 +272,30 @@ class DelayStudyApp:
 
         # Calculate results by period and direction
         results_by_period_direction = {}
+        results_by_period_overall = {}
         overall_results_by_direction = {}
         
         for period in range(1, 5):
             results_by_period_direction[period] = {}
+            # Aggregate period totals across directions
+            period_rows = [d for d in self.data if d[0] == period]
+            if period_rows:
+                p_total_stopped = sum(d[7] for d in period_rows)
+                p_total_notstopped = sum(d[12] for d in period_rows)
+                p_total_vehicles = p_total_stopped + p_total_notstopped
+                if p_total_vehicles > 0:
+                    p_total_delay = p_total_stopped * 15
+                    p_avg_delay_stopped = p_total_delay / p_total_stopped if p_total_stopped > 0 else 0
+                    p_avg_delay_approach = p_total_delay / p_total_vehicles
+                    p_percent_stopped = (p_total_stopped / p_total_vehicles) * 100
+                    results_by_period_overall[period] = {
+                        "Total Vehicles": p_total_vehicles,
+                        "Total Stopped": p_total_stopped,
+                        "Total Delay (sec)": p_total_delay,
+                        "Avg Delay per Stopped (sec)": p_avg_delay_stopped,
+                        "Avg Delay per Approach (sec)": p_avg_delay_approach,
+                        "Percent Stopped": p_percent_stopped
+                    }
             for direction in ["North", "South", "East", "West"]:
                 # Filter data for this period and direction (period is now index 0, direction is index 2)
                 period_direction_data = [d for d in self.data if d[0] == period and d[2] == direction]
@@ -339,7 +359,7 @@ class DelayStudyApp:
                 
                 overall_df = pd.DataFrame(overall_results_data)
                 
-                # Create DataFrame for period-by-period results
+                # Create DataFrame for period-by-period results (by direction)
                 period_results_data = []
                 for period in range(1, 5):
                     for direction, data in results_by_period_direction[period].items():
@@ -350,6 +370,15 @@ class DelayStudyApp:
                         })
                 
                 period_df = pd.DataFrame(period_results_data)
+
+                # Create DataFrame for period summaries (all directions combined)
+                period_overall_results_data = []
+                for period in sorted(results_by_period_overall.keys()):
+                    period_overall_results_data.append({
+                        "Period": period,
+                        **results_by_period_overall[period]
+                    })
+                period_overall_df = pd.DataFrame(period_overall_results_data)
                 
                 # Write to Excel with proper formatting
                 with pd.ExcelWriter(filename, engine='openpyxl') as writer:
@@ -368,24 +397,29 @@ class DelayStudyApp:
                     
                     # Write period-by-period results to separate sheet
                     period_df.to_excel(writer, sheet_name='Period Results', index=False)
+
+                    # Write period summary sheet
+                    period_overall_df.to_excel(writer, sheet_name='Period Summary', index=False)
                     
                     # Auto-adjust columns width
-                    for sheet_name in ['Overall Results', 'Period Results']:
+                    for sheet_name in ['Overall Results', 'Period Results', 'Period Summary']:
                         worksheet = writer.sheets[sheet_name]
                         if sheet_name == 'Overall Results':
                             df_to_adjust = overall_df
-                        else:
+                        elif sheet_name == 'Period Results':
                             df_to_adjust = period_df
+                        else:
+                            df_to_adjust = period_overall_df
                         for idx, col in enumerate(df_to_adjust.columns):
                             worksheet.column_dimensions[chr(65 + idx)].width = 20
 
                 messagebox.showinfo("Success", f"Results saved to {filename}")
-                self.show_results_popup(overall_results_by_direction, results_by_period_direction)
+                self.show_results_popup(overall_results_by_direction, results_by_period_direction, results_by_period_overall)
                 
         except Exception as e:
             messagebox.showerror("Error", f"Error saving results: {str(e)}")
 
-    def show_results_popup(self, overall_results_by_direction, results_by_period_direction):
+    def show_results_popup(self, overall_results_by_direction, results_by_period_direction, results_by_period_overall):
         results = f"Intersection: {self.intersection_var.get()}\n"
         results += f"Date: {self.date_var.get()}\n"
         results += f"Weather: {self.weather_var.get()}\n\n"
@@ -401,14 +435,24 @@ class DelayStudyApp:
             results += f"Avg Delay per Approach Vehicle: {data['Avg Delay per Approach (sec)']:.1f} seconds\n"
             results += f"Percent Stopped: {data['Percent Stopped']:.1f}%\n"
         
-        # Period-by-Period Results
-        results += "\n\n=== PERIOD-BY-PERIOD RESULTS ===\n"
+        # Period-by-Period Results (by direction)
+        results += "\n\n=== PERIOD-BY-PERIOD RESULTS (by direction) ===\n"
         for period in range(1, 5):
             results += f"\nPeriod {period} ({15*(period-1)}-{15*period} minutes):\n"
             for direction, data in results_by_period_direction[period].items():
                 results += f"  {direction}: {data['Total Vehicles']} vehicles, "
                 results += f"{data['Total Stopped']} stopped, "
                 results += f"{data['Avg Delay per Approach (sec)']:.1f}s avg delay\n"
+
+        # Period Summaries (all directions combined)
+        results += "\n\n=== PERIOD SUMMARIES (all directions) ===\n"
+        for period in sorted(results_by_period_overall.keys()):
+            data = results_by_period_overall[period]
+            results += (
+                f"Period {period}: total={data['Total Vehicles']}, stopped={data['Total Stopped']}, "
+                f"delay={data['Total Delay (sec)']:.0f}s, avgStopped={data['Avg Delay per Stopped (sec)']:.1f}s, "
+                f"avgApproach={data['Avg Delay per Approach (sec)']:.1f}s, %stopped={data['Percent Stopped']:.1f}%\n"
+            )
 
         messagebox.showinfo("Delay Study Results", results)
 

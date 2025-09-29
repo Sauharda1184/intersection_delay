@@ -12,6 +12,11 @@ class DelayStudyApp:
         self.data = []
         # Stores observed approach volume per (period, direction)
         self.approach_volume = {}
+        # Aggregated unique counts per (period, direction)
+        self.unique_map = {}
+        # Temporary per-minute unique results from Unique Assist
+        self.current_unique_stopped = None
+        self.current_unique_notstopped = None
 
         # --- Title ---
         title_label = ttk.Label(root, text="Traffic Delay Study Data Collection",
@@ -153,6 +158,7 @@ class DelayStudyApp:
         btn_frame = ttk.Frame(input_frame)
         btn_frame.pack(fill="x", padx=5, pady=5)
         
+        ttk.Button(btn_frame, text="Unique Assist", command=self.open_unique_assist).pack(side="left", padx=5)
         ttk.Button(btn_frame, text="Add Entry", command=self.add_entry).pack(side="left", padx=5)
         ttk.Button(btn_frame, text="Reset Counts", command=self.reset_counts).pack(side="left", padx=5)
 
@@ -276,6 +282,24 @@ class DelayStudyApp:
             )
             self.data.append(entry_data)
             
+            # Compute unique counts for approach volume using Unique Assist results if available
+            if self.current_unique_stopped is None or self.current_unique_notstopped is None:
+                # Default assumption: no overlap across snapshots; count all as unique
+                unique_stopped = total_stopped
+                unique_notstopped = total_notstopped
+            else:
+                unique_stopped = max(0, int(self.current_unique_stopped))
+                unique_notstopped = max(0, int(self.current_unique_notstopped))
+            # Aggregate per (period, direction)
+            key = (period, direction)
+            if key not in self.unique_map:
+                self.unique_map[key] = {"stopped": 0, "notstopped": 0}
+            self.unique_map[key]["stopped"] += unique_stopped
+            self.unique_map[key]["notstopped"] += unique_notstopped
+            # Clear temp unique once used
+            self.current_unique_stopped = None
+            self.current_unique_notstopped = None
+
             # Add to treeview
             self.tree.insert("", "end", values=entry_data)
 
@@ -285,6 +309,78 @@ class DelayStudyApp:
             
         except ValueError:
             messagebox.showerror("Invalid Input", "Please enter valid numbers.")
+
+    def open_unique_assist(self):
+        """Dialog to help deduplicate counts across 15s snapshots for this minute."""
+        # Gather current counts
+        try:
+            s0, s15, s30, s45 = [int(v.get()) for v in self.interval_vars]
+            n0, n15, n30, n45 = [int(v.get()) for v in self.notstopped_vars]
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please ensure counts are numbers before using Unique Assist.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Unique Assist (Same vs Different Vehicles)")
+        win.geometry("520x340")
+
+        container = ttk.Frame(win)
+        container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        ttk.Label(container, text="Enter how many at each later snapshot were the SAME as previous snapshot").grid(row=0, column=0, columnspan=4, pady=5)
+
+        # Headers
+        ttk.Label(container, text="Interval").grid(row=1, column=0, padx=4)
+        ttk.Label(container, text="Stopped: same as previous").grid(row=1, column=1, padx=4)
+        ttk.Label(container, text="Not Stopped: same as previous").grid(row=1, column=2, padx=4)
+
+        # For +15, +30, +45 we need same-as-previous entries
+        same_stopped_vars = {}
+        same_notstopped_vars = {}
+        intervals = [("+15 sec", s15, n15), ("+30 sec", s30, n30), ("+45 sec", s45, n45)]
+        for idx, (label, sval, nval) in enumerate(intervals, start=2):
+            ttk.Label(container, text=label).grid(row=idx, column=0, sticky="w", padx=4, pady=2)
+            sv = tk.StringVar(value="0")
+            nv = tk.StringVar(value="0")
+            same_stopped_vars[label] = sv
+            same_notstopped_vars[label] = nv
+            ttk.Entry(container, textvariable=sv, width=10, justify="center").grid(row=idx, column=1, padx=4)
+            ttk.Entry(container, textvariable=nv, width=10, justify="center").grid(row=idx, column=2, padx=4)
+
+        # Results labels
+        result_lbl = ttk.Label(container, text="")
+        result_lbl.grid(row=6, column=0, columnspan=4, pady=10)
+
+        def compute_unique():
+            def safe_int(v):
+                try:
+                    return max(0, int(v))
+                except Exception:
+                    return 0
+            same15_s = safe_int(same_stopped_vars["+15 sec"].get())
+            same30_s = safe_int(same_stopped_vars["+30 sec"].get())
+            same45_s = safe_int(same_stopped_vars["+45 sec"].get())
+            same15_n = safe_int(same_notstopped_vars["+15 sec"].get())
+            same30_n = safe_int(same_notstopped_vars["+30 sec"].get())
+            same45_n = safe_int(same_notstopped_vars["+45 sec"].get())
+
+            u_stopped = max(0, s0) + max(0, s15 - same15_s) + max(0, s30 - same30_s) + max(0, s45 - same45_s)
+            u_notstopped = max(0, n0) + max(0, n15 - same15_n) + max(0, n30 - same30_n) + max(0, n45 - same45_n)
+
+            self.current_unique_stopped = u_stopped
+            self.current_unique_notstopped = u_notstopped
+            result_lbl.config(text=f"Unique Stopped: {u_stopped}    Unique Not Stopped: {u_notstopped}    Total: {u_stopped + u_notstopped}")
+
+        def use_and_close():
+            if self.current_unique_stopped is None:
+                compute_unique()
+            win.destroy()
+
+        btns = ttk.Frame(container)
+        btns.grid(row=7, column=0, columnspan=4, pady=8)
+        ttk.Button(btns, text="Compute", command=compute_unique).pack(side="left", padx=5)
+        ttk.Button(btns, text="Use These", command=use_and_close).pack(side="left", padx=5)
+        ttk.Button(btns, text="Cancel", command=win.destroy).pack(side="left", padx=5)
 
     def save_approach_volume(self):
         """Save observed approach volume for current 15-minute period and direction."""
@@ -571,6 +667,9 @@ class DelayStudyApp:
             self.reset_counts()
             self.approach_volume.clear()
             self.approach_volume_var.set("0")
+            self.unique_map.clear()
+            self.current_unique_stopped = None
+            self.current_unique_notstopped = None
 
     def generate_form2(self):
         """Generate Form 2 with aggregated 15-minute period data."""
@@ -581,15 +680,16 @@ class DelayStudyApp:
         # Create Form 2 window
         form2_window = Form2Window(self.root, self.data, self.date_var.get(), 
                                   self.intersection_var.get(), self.weather_var.get(),
-                                  self.approach_volume)
+                                  self.approach_volume, self.unique_map)
 
 class Form2Window:
-    def __init__(self, parent, data, date, intersection, weather, approach_volume_map):
+    def __init__(self, parent, data, date, intersection, weather, approach_volume_map, unique_map):
         self.data = data
         self.date = date
         self.intersection = intersection
         self.weather = weather
         self.approach_volume_map = approach_volume_map
+        self.unique_map = unique_map
         
         # Create new window
         self.window = tk.Toplevel(parent)
@@ -664,7 +764,7 @@ class Form2Window:
         
         # Create treeview for Form 2 data
         self.form2_tree = ttk.Treeview(table_frame, 
-            columns=("period", "time_range", "direction", "total_stopped", "total_notstopped", "total_volume", "observed_volume"),
+            columns=("period", "time_range", "direction", "total_stopped", "total_notstopped", "total_volume", "observed_stopped", "observed_notstopped", "observed_volume"),
             show="headings",
             yscrollcommand=scrollbar.set)
         
@@ -676,7 +776,9 @@ class Form2Window:
             "total_stopped": "Total Stopped",
             "total_notstopped": "Total Not Stopped", 
             "total_volume": "Total Volume",
-            "observed_volume": "Observed Volume (15-min)"
+            "observed_stopped": "Observed Stopped (unique)",
+            "observed_notstopped": "Observed Not Stopped (unique)",
+            "observed_volume": "Observed Volume (unique)"
         }
         
         for col, heading in headers.items():
@@ -740,10 +842,13 @@ class Form2Window:
                     stopped = period_data[period][direction]["stopped"]
                     notstopped = period_data[period][direction]["notstopped"]
                     total = stopped + notstopped
-                    observed = self.approach_volume_map.get((period, direction), "")
+                    u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                    observed_st = u["stopped"]
+                    observed_ns = u["notstopped"]
+                    observed = observed_st + observed_ns
                     
                     self.form2_tree.insert("", "end", values=(
-                        period, time_range, direction, stopped, notstopped, total, observed
+                        period, time_range, direction, stopped, notstopped, total, observed_st, observed_ns, observed
                     ))
 
     def calculate_form2_results(self):
@@ -824,7 +929,7 @@ Period {period} ({15*(period-1):02d}:00-{15*period:02d}:00):
                     form2_data.append(values)
                 
                 # Create DataFrame
-                columns = ["Period", "Time Range", "Direction", "Total Stopped", "Total Not Stopped", "Total Volume", "Observed Volume (15-min)"]
+                columns = ["Period", "Time Range", "Direction", "Total Stopped", "Total Not Stopped", "Total Volume", "Observed Stopped (unique)", "Observed Not Stopped (unique)", "Observed Volume (unique)"]
                 df = pd.DataFrame(form2_data, columns=columns)
                 
                 # Write to Excel

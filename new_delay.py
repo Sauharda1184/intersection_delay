@@ -10,6 +10,8 @@ class DelayStudyApp:
         self.root.title("Intersection Delay Study Data Collector")
         self.root.geometry("1200x800")
         self.data = []
+        # Stores observed approach volume per (period, direction)
+        self.approach_volume = {}
 
         # --- Title ---
         title_label = ttk.Label(root, text="Traffic Delay Study Data Collection",
@@ -77,6 +79,10 @@ class DelayStudyApp:
         self.progress_button = ttk.Button(time_dir_frame, text="Next Minute", command=self.next_minute)
         self.progress_button.pack(side="left", padx=5)
 
+        # Keep the tally matched with selected period/direction
+        self.period_combo.bind("<<ComboboxSelected>>", self.on_period_or_direction_change)
+        self.direction_combo.bind("<<ComboboxSelected>>", self.on_period_or_direction_change)
+
         # Stopped vehicle counts frame
         stopped_frame = ttk.LabelFrame(input_frame, text="Vehicles Stopped at Each Interval")
         stopped_frame.pack(fill="x", padx=5, pady=5)
@@ -129,6 +135,19 @@ class DelayStudyApp:
                       command=lambda v=count_var: self.increment_count(v)).pack(side="left", padx=1)
             ttk.Button(btn_frame, text="-", width=3,
                       command=lambda v=count_var: self.decrement_count(v)).pack(side="left", padx=1)
+
+        # Approach volume tally frame (15-minute)
+        volume_frame = ttk.LabelFrame(input_frame, text="Approach Volume Tally (15-minute)")
+        volume_frame.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(volume_frame, text="Observed vehicles in current 15-min period and direction").pack(side="left", padx=5)
+        self.approach_volume_var = tk.StringVar(value="0")
+        self.approach_volume_entry = ttk.Entry(volume_frame, textvariable=self.approach_volume_var, width=7, justify="center")
+        self.approach_volume_entry.pack(side="left", padx=5)
+        ttk.Button(volume_frame, text="+", width=3, command=lambda: self.increment_count(self.approach_volume_var)).pack(side="left", padx=2)
+        ttk.Button(volume_frame, text="-", width=3, command=lambda: self.decrement_count(self.approach_volume_var)).pack(side="left", padx=2)
+        ttk.Button(volume_frame, text="Reset", command=lambda: self.approach_volume_var.set("0")).pack(side="left", padx=6)
+        ttk.Button(volume_frame, text="Save 15-min Volume", command=self.save_approach_volume).pack(side="left", padx=6)
 
         # Add Entry and Reset Counts buttons
         btn_frame = ttk.Frame(input_frame)
@@ -227,6 +246,8 @@ class DelayStudyApp:
                 next_period = current_period + 1
                 self.period_var.set(f"{next_period} ({15*(next_period-1)}-{15*next_period} min)")
                 self.minute_var.set("0")
+                # Reset tally display for new period; load if previously saved
+                self.on_period_or_direction_change()
             else:
                 messagebox.showinfo("Study Complete", "All 4 periods (60 minutes) have been completed!")
 
@@ -264,6 +285,27 @@ class DelayStudyApp:
             
         except ValueError:
             messagebox.showerror("Invalid Input", "Please enter valid numbers.")
+
+    def save_approach_volume(self):
+        """Save observed approach volume for current 15-minute period and direction."""
+        try:
+            period = int(self.period_var.get().split()[0])
+            direction = self.direction_var.get()
+            count = int(self.approach_volume_var.get())
+            self.approach_volume[(period, direction)] = count
+            messagebox.showinfo("Saved", f"Saved {count} vehicles for Period {period} - {direction}")
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Approach volume must be a whole number.")
+
+    def on_period_or_direction_change(self, event=None):
+        """Load saved tally for selected period/direction, else clear to 0."""
+        try:
+            period = int(self.period_var.get().split()[0])
+        except Exception:
+            period = 1
+        direction = self.direction_var.get()
+        val = self.approach_volume.get((period, direction))
+        self.approach_volume_var.set(str(val) if val is not None else "0")
 
     def calculate_results(self):
         if not self.data:
@@ -527,6 +569,8 @@ class DelayStudyApp:
             self.period_var.set("1 (0-15 min)")
             self.minute_var.set("0")
             self.reset_counts()
+            self.approach_volume.clear()
+            self.approach_volume_var.set("0")
 
     def generate_form2(self):
         """Generate Form 2 with aggregated 15-minute period data."""
@@ -536,14 +580,16 @@ class DelayStudyApp:
         
         # Create Form 2 window
         form2_window = Form2Window(self.root, self.data, self.date_var.get(), 
-                                  self.intersection_var.get(), self.weather_var.get())
+                                  self.intersection_var.get(), self.weather_var.get(),
+                                  self.approach_volume)
 
 class Form2Window:
-    def __init__(self, parent, data, date, intersection, weather):
+    def __init__(self, parent, data, date, intersection, weather, approach_volume_map):
         self.data = data
         self.date = date
         self.intersection = intersection
         self.weather = weather
+        self.approach_volume_map = approach_volume_map
         
         # Create new window
         self.window = tk.Toplevel(parent)
@@ -618,7 +664,7 @@ class Form2Window:
         
         # Create treeview for Form 2 data
         self.form2_tree = ttk.Treeview(table_frame, 
-            columns=("period", "time_range", "direction", "total_stopped", "total_notstopped", "total_volume"),
+            columns=("period", "time_range", "direction", "total_stopped", "total_notstopped", "total_volume", "observed_volume"),
             show="headings",
             yscrollcommand=scrollbar.set)
         
@@ -629,7 +675,8 @@ class Form2Window:
             "direction": "Direction",
             "total_stopped": "Total Stopped",
             "total_notstopped": "Total Not Stopped", 
-            "total_volume": "Total Volume"
+            "total_volume": "Total Volume",
+            "observed_volume": "Observed Volume (15-min)"
         }
         
         for col, heading in headers.items():
@@ -693,9 +740,10 @@ class Form2Window:
                     stopped = period_data[period][direction]["stopped"]
                     notstopped = period_data[period][direction]["notstopped"]
                     total = stopped + notstopped
+                    observed = self.approach_volume_map.get((period, direction), "")
                     
                     self.form2_tree.insert("", "end", values=(
-                        period, time_range, direction, stopped, notstopped, total
+                        period, time_range, direction, stopped, notstopped, total, observed
                     ))
 
     def calculate_form2_results(self):
@@ -776,7 +824,7 @@ Period {period} ({15*(period-1):02d}:00-{15*period:02d}:00):
                     form2_data.append(values)
                 
                 # Create DataFrame
-                columns = ["Period", "Time Range", "Direction", "Total Stopped", "Total Not Stopped", "Total Volume"]
+                columns = ["Period", "Time Range", "Direction", "Total Stopped", "Total Not Stopped", "Total Volume", "Observed Volume (15-min)"]
                 df = pd.DataFrame(form2_data, columns=columns)
                 
                 # Write to Excel

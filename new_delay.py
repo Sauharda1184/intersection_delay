@@ -285,26 +285,24 @@ class DelayStudyApp:
             notstopped_counts = [int(var.get()) for var in self.notstopped_vars]
             total_notstopped = sum(notstopped_counts)
             
-            total = total_stopped + total_notstopped
-            
-            # Create data tuple with all values including period
+            # Total volume for the minute must be the UNIQUE vehicles this minute
+            # Default to inline unique minute value if set; otherwise compute fallback and persist
+            unique_total_minute = self.get_unique_minute(period, direction, minute)
+            if unique_total_minute is None:
+                if self.current_unique_stopped is None or self.current_unique_notstopped is None:
+                    unique_total_minute = total_stopped + total_notstopped
+                else:
+                    unique_total_minute = max(0, int(self.current_unique_stopped)) + max(0, int(self.current_unique_notstopped))
+                self.set_unique_minute(period, direction, minute, unique_total_minute)
+
+            # Create data tuple with all values including period, using unique total for 'Total Volume'
             entry_data = (
                 period, minute, direction, 
                 *stopped_counts, total_stopped,
                 *notstopped_counts, total_notstopped,
-                total
+                unique_total_minute
             )
             self.data.append(entry_data)
-            
-            # Compute unique total for approach volume using inline counter if present,
-            # else fall back to Unique Assist, else default to total minute volume.
-            unique_total_minute = self.get_unique_minute(period, direction, minute)
-            if unique_total_minute is None:
-                if self.current_unique_stopped is None or self.current_unique_notstopped is None:
-                    unique_total_minute = total
-                else:
-                    unique_total_minute = max(0, int(self.current_unique_stopped)) + max(0, int(self.current_unique_notstopped))
-                self.set_unique_minute(period, direction, minute, unique_total_minute)
             # Recompute aggregates per (period, direction)
             self.recompute_unique_aggregates()
             # Clear temp unique once used
@@ -493,8 +491,11 @@ class DelayStudyApp:
             period_rows = [d for d in self.data if d[0] == period]
             if period_rows:
                 p_total_stopped = sum(d[7] for d in period_rows)
-                p_total_notstopped = sum(d[12] for d in period_rows)
-                p_total_vehicles = p_total_stopped + p_total_notstopped
+                # Approach volume for period = sum of unique per direction for this period
+                p_total_vehicles = 0
+                for direction in ["North", "South", "East", "West"]:
+                    u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                    p_total_vehicles += (u["stopped"] + u["notstopped"])
                 if p_total_vehicles > 0:
                     p_total_delay = p_total_stopped * 15
                     p_avg_delay_stopped = p_total_delay / p_total_stopped if p_total_stopped > 0 else 0
@@ -513,8 +514,9 @@ class DelayStudyApp:
                 period_direction_data = [d for d in self.data if d[0] == period and d[2] == direction]
                 if period_direction_data:
                     total_stopped = sum(d[7] for d in period_direction_data)  # Index 7 is total_stopped
-                    total_notstopped = sum(d[12] for d in period_direction_data)  # Index 12 is total_notstopped
-                    total_vehicles = total_stopped + total_notstopped
+                    # Unique approach volume for this period+direction
+                    u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                    total_vehicles = u["stopped"] + u["notstopped"]
                     
                     if total_vehicles > 0:
                         total_delay = total_stopped * 15  # Total Delay formula
@@ -536,8 +538,11 @@ class DelayStudyApp:
             direction_data = [d for d in self.data if d[2] == direction]
             if direction_data:
                 total_stopped = sum(d[7] for d in direction_data)  # Index 7 is total_stopped
-                total_notstopped = sum(d[12] for d in direction_data)  # Index 12 is total_notstopped
-                total_vehicles = total_stopped + total_notstopped
+                # Unique approach volume overall for direction across all periods
+                total_vehicles = 0
+                for period in range(1, 5):
+                    u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                    total_vehicles += (u["stopped"] + u["notstopped"])
                 
                 if total_vehicles > 0:
                     total_delay = total_stopped * 15  # Total Delay formula
@@ -927,10 +932,13 @@ class Form2Window:
 
     def calculate_form2_results(self):
         """Calculate and display Form 2 results."""
-        # Aggregate all data
+        # Aggregate using unique approach volume for correctness with formulas
         total_stopped = sum(row[7] for row in self.data)
-        total_notstopped = sum(row[12] for row in self.data)
-        total_vehicles = total_stopped + total_notstopped
+        total_vehicles = 0
+        for period in range(1, 5):
+            for direction in ["North", "South", "East", "West"]:
+                u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                total_vehicles += (u["stopped"] + u["notstopped"])
         
         # Calculate metrics
         total_delay_seconds = total_stopped * 15  # Each stopped vehicle = 15 seconds delay
@@ -953,7 +961,7 @@ STUDY SUMMARY
 {'='*50}
 Total Vehicles Observed: {total_vehicles}
 Total Vehicles Stopped: {total_stopped}
-Total Vehicles Not Stopped: {total_notstopped}
+Total Vehicles Not Stopped: {max(total_vehicles - total_stopped, 0)}
 Study Duration: 60 minutes (4 x 15-minute periods)
 Sampling Interval: 15 seconds
 
@@ -965,14 +973,16 @@ PERIOD BREAKDOWN
         for row in self.data:
             period = row[0]
             if period not in period_data:
-                period_data[period] = {"stopped": 0, "notstopped": 0}
+                period_data[period] = {"stopped": 0}
             period_data[period]["stopped"] += row[7]
-            period_data[period]["notstopped"] += row[12]
         
         for period in sorted(period_data.keys()):
             stopped = period_data[period]["stopped"]
-            notstopped = period_data[period]["notstopped"]
-            total = stopped + notstopped
+            # unique total approach volume for this period across all directions
+            total = 0
+            for direction in ["North", "South", "East", "West"]:
+                u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                total += (u["stopped"] + u["notstopped"])
             period_delay = stopped * 15
             period_avg_delay = period_delay / total if total > 0 else 0
             
@@ -980,7 +990,7 @@ PERIOD BREAKDOWN
 Period {period} ({15*(period-1):02d}:00-{15*period:02d}:00):
   Total Vehicles: {total}
   Stopped: {stopped}
-  Not Stopped: {notstopped}
+  Not Stopped: {max(total - stopped, 0)}
   Total Delay: {period_delay} vehicle-seconds
   Average Delay: {period_avg_delay:.2f} seconds/vehicle"""
         

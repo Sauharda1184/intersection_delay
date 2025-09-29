@@ -17,6 +17,8 @@ class DelayStudyApp:
         # Temporary per-minute unique results from Unique Assist
         self.current_unique_stopped = None
         self.current_unique_notstopped = None
+        # Inline unique per-minute counter storage
+        self.unique_minute_map = {}
 
         # --- Title ---
         title_label = ttk.Label(root, text="Traffic Delay Study Data Collection",
@@ -141,6 +143,17 @@ class DelayStudyApp:
             ttk.Button(btn_frame, text="-", width=3,
                       command=lambda v=count_var: self.decrement_count(v)).pack(side="left", padx=1)
 
+        # Inline Unique Vehicle Counter (per-minute)
+        unique_inline = ttk.LabelFrame(input_frame, text="Unique Vehicles This Minute (Approach Volume)")
+        unique_inline.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(unique_inline, text="Unique vehicles observed this minute for selected direction").pack(side="left", padx=5)
+        self.unique_minute_var = tk.StringVar(value="0")
+        self.unique_minute_entry = ttk.Entry(unique_inline, textvariable=self.unique_minute_var, width=7, justify="center")
+        self.unique_minute_entry.pack(side="left", padx=5)
+        ttk.Button(unique_inline, text="+ Unique Vehicle", command=self.increment_unique_minute).pack(side="left", padx=4)
+        ttk.Button(unique_inline, text="Reset Unique", command=self.reset_unique_minute).pack(side="left", padx=6)
+
         # Approach volume tally frame (15-minute)
         volume_frame = ttk.LabelFrame(input_frame, text="Approach Volume Tally (15-minute)")
         volume_frame.pack(fill="x", padx=5, pady=5)
@@ -245,6 +258,8 @@ class DelayStudyApp:
         current_minute = int(self.minute_var.get())
         if current_minute < 14:  # 0-14 minutes in each 15-minute period
             self.minute_var.set(str(current_minute + 1))
+            # Load unique counter for new minute
+            self.load_unique_counter_for_current_context()
         else:
             # Move to next period
             current_period = int(self.period_var.get().split()[0])
@@ -282,20 +297,17 @@ class DelayStudyApp:
             )
             self.data.append(entry_data)
             
-            # Compute unique counts for approach volume using Unique Assist results if available
-            if self.current_unique_stopped is None or self.current_unique_notstopped is None:
-                # Default assumption: no overlap across snapshots; count all as unique
-                unique_stopped = total_stopped
-                unique_notstopped = total_notstopped
-            else:
-                unique_stopped = max(0, int(self.current_unique_stopped))
-                unique_notstopped = max(0, int(self.current_unique_notstopped))
-            # Aggregate per (period, direction)
-            key = (period, direction)
-            if key not in self.unique_map:
-                self.unique_map[key] = {"stopped": 0, "notstopped": 0}
-            self.unique_map[key]["stopped"] += unique_stopped
-            self.unique_map[key]["notstopped"] += unique_notstopped
+            # Compute unique total for approach volume using inline counter if present,
+            # else fall back to Unique Assist, else default to total minute volume.
+            unique_total_minute = self.get_unique_minute(period, direction, minute)
+            if unique_total_minute is None:
+                if self.current_unique_stopped is None or self.current_unique_notstopped is None:
+                    unique_total_minute = total
+                else:
+                    unique_total_minute = max(0, int(self.current_unique_stopped)) + max(0, int(self.current_unique_notstopped))
+                self.set_unique_minute(period, direction, minute, unique_total_minute)
+            # Recompute aggregates per (period, direction)
+            self.recompute_unique_aggregates()
             # Clear temp unique once used
             self.current_unique_stopped = None
             self.current_unique_notstopped = None
@@ -402,6 +414,69 @@ class DelayStudyApp:
         direction = self.direction_var.get()
         val = self.approach_volume.get((period, direction))
         self.approach_volume_var.set(str(val) if val is not None else "0")
+        # Load the unique minute counter for current minute context
+        self.load_unique_counter_for_current_context()
+
+    def get_unique_minute(self, period, direction, minute):
+        return self.unique_minute_map.get((period, direction, minute))
+
+    def set_unique_minute(self, period, direction, minute, value):
+        self.unique_minute_map[(period, direction, minute)] = max(0, int(value))
+
+    def load_unique_counter_for_current_context(self):
+        try:
+            period = int(self.period_var.get().split()[0])
+            minute = int(self.minute_var.get())
+        except Exception:
+            period = 1
+            minute = 0
+        direction = self.direction_var.get()
+        v = self.get_unique_minute(period, direction, minute)
+        self.unique_minute_var.set(str(v) if v is not None else "0")
+
+    def increment_unique_minute(self):
+        try:
+            current = int(self.unique_minute_var.get())
+        except ValueError:
+            current = 0
+        new_val = current + 1
+        self.unique_minute_var.set(str(new_val))
+        # Persist and aggregate
+        period = int(self.period_var.get().split()[0])
+        minute = int(self.minute_var.get())
+        direction = self.direction_var.get()
+        self.set_unique_minute(period, direction, minute, new_val)
+        self.recompute_unique_aggregates()
+
+    def reset_unique_minute(self):
+        self.unique_minute_var.set("0")
+        try:
+            period = int(self.period_var.get().split()[0])
+            minute = int(self.minute_var.get())
+        except Exception:
+            return
+        direction = self.direction_var.get()
+        self.set_unique_minute(period, direction, minute, 0)
+        self.recompute_unique_aggregates()
+
+    def recompute_unique_aggregates(self):
+        # Sum per (period, direction) from per-minute unique totals
+        agg = {}
+        for (p, d, m), val in self.unique_minute_map.items():
+            if (p, d) not in agg:
+                agg[(p, d)] = {"stopped": 0, "notstopped": 0}
+            # We only track total unique; store in notstopped bucket to keep structure
+            agg[(p, d)]["notstopped"] += int(val)
+        self.unique_map = agg
+        # Keep approach_volume in sync for compatibility and display
+        self.approach_volume = {k: v["stopped"] + v["notstopped"] for k, v in self.unique_map.items()}
+        # Update displayed approach tally for current selection
+        try:
+            period = int(self.period_var.get().split()[0])
+        except Exception:
+            period = 1
+        direction = self.direction_var.get()
+        self.approach_volume_var.set(str(self.approach_volume.get((period, direction), 0)))
 
     def calculate_results(self):
         if not self.data:

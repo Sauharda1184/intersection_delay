@@ -171,7 +171,6 @@ class DelayStudyApp:
         btn_frame = ttk.Frame(input_frame)
         btn_frame.pack(fill="x", padx=5, pady=5)
         
-        ttk.Button(btn_frame, text="Unique Assist", command=self.open_unique_assist).pack(side="left", padx=5)
         ttk.Button(btn_frame, text="Add Entry", command=self.add_entry).pack(side="left", padx=5)
         ttk.Button(btn_frame, text="Reset Counts", command=self.reset_counts).pack(side="left", padx=5)
 

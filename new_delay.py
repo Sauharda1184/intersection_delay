@@ -290,24 +290,27 @@ class DelayStudyApp:
             notstopped_counts = [int(var.get()) for var in self.notstopped_vars]
             total_notstopped = sum(notstopped_counts)
             
-            # Total volume for the minute must be UNIQUE vehicles this minute (split into stopped/notstopped)
-            unique_split = self.get_unique_minute(period, direction, minute)
-            if unique_split is None:
-                if self.current_unique_stopped is None or self.current_unique_notstopped is None:
-                    u_st = total_stopped
-                    u_ns = total_notstopped
-                else:
-                    u_st = max(0, int(self.current_unique_stopped))
-                    u_ns = max(0, int(self.current_unique_notstopped))
-                self.set_unique_minute(period, direction, minute, {"stopped": u_st, "notstopped": u_ns})
-                unique_split = {"stopped": u_st, "notstopped": u_ns}
-            unique_total_minute = unique_split["stopped"] + unique_split["notstopped"]
+            # Get unique counts from inline counters (current values in the UI)
+            try:
+                unique_stopped_count = int(self.unique_minute_stopped_var.get() or 0)
+                unique_notstopped_count = int(self.unique_minute_notstopped_var.get() or 0)
+            except ValueError:
+                unique_stopped_count = 0
+                unique_notstopped_count = 0
+            
+            # Store these unique counts for this minute
+            self.set_unique_minute(period, direction, minute, {
+                "stopped": unique_stopped_count, 
+                "notstopped": unique_notstopped_count
+            })
+            
+            unique_total_minute = unique_stopped_count + unique_notstopped_count
 
             # Create data tuple with all values including period, using unique totals for 'Total Stopped' and 'Total Volume'
             entry_data = (
                 period, minute, direction, 
-                *stopped_counts, unique_split["stopped"],
-                *notstopped_counts, unique_split["notstopped"],
+                *stopped_counts, unique_stopped_count,
+                *notstopped_counts, unique_notstopped_count,
                 unique_total_minute
             )
             self.data.append(entry_data)

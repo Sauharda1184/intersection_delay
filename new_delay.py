@@ -17,7 +17,7 @@ class DelayStudyApp:
         # Temporary per-minute unique results from Unique Assist
         self.current_unique_stopped = None
         self.current_unique_notstopped = None
-        # Inline unique per-minute counter storage
+        # Inline unique per-minute counter storage: {(period, direction, minute): {"stopped": int, "notstopped": int}}
         self.unique_minute_map = {}
 
         # --- Title ---
@@ -143,16 +143,21 @@ class DelayStudyApp:
             ttk.Button(btn_frame, text="-", width=3,
                       command=lambda v=count_var: self.decrement_count(v)).pack(side="left", padx=1)
 
-        # Inline Unique Vehicle Counter (per-minute)
+        # Inline Unique Vehicle Counters (per-minute)
         unique_inline = ttk.LabelFrame(input_frame, text="Unique Vehicles This Minute (Approach Volume)")
         unique_inline.pack(fill="x", padx=5, pady=5)
 
-        ttk.Label(unique_inline, text="Unique vehicles observed this minute for selected direction").pack(side="left", padx=5)
-        self.unique_minute_var = tk.StringVar(value="0")
-        self.unique_minute_entry = ttk.Entry(unique_inline, textvariable=self.unique_minute_var, width=7, justify="center")
-        self.unique_minute_entry.pack(side="left", padx=5)
-        ttk.Button(unique_inline, text="+ Unique Vehicle", command=self.increment_unique_minute).pack(side="left", padx=4)
-        ttk.Button(unique_inline, text="Reset Unique", command=self.reset_unique_minute).pack(side="left", padx=6)
+        ttk.Label(unique_inline, text="Unique Stopped").pack(side="left", padx=5)
+        self.unique_minute_stopped_var = tk.StringVar(value="0")
+        ttk.Entry(unique_inline, textvariable=self.unique_minute_stopped_var, width=7, justify="center").pack(side="left", padx=2)
+        ttk.Button(unique_inline, text="+", width=3, command=lambda: self.increment_unique_minute(True)).pack(side="left", padx=2)
+
+        ttk.Label(unique_inline, text="Unique Not Stopped").pack(side="left", padx=10)
+        self.unique_minute_notstopped_var = tk.StringVar(value="0")
+        ttk.Entry(unique_inline, textvariable=self.unique_minute_notstopped_var, width=7, justify="center").pack(side="left", padx=2)
+        ttk.Button(unique_inline, text="+", width=3, command=lambda: self.increment_unique_minute(False)).pack(side="left", padx=2)
+
+        ttk.Button(unique_inline, text="Reset Unique", command=self.reset_unique_minute).pack(side="left", padx=10)
 
         # Approach volume tally frame (15-minute)
         volume_frame = ttk.LabelFrame(input_frame, text="Approach Volume Tally (15-minute)")
@@ -285,15 +290,18 @@ class DelayStudyApp:
             notstopped_counts = [int(var.get()) for var in self.notstopped_vars]
             total_notstopped = sum(notstopped_counts)
             
-            # Total volume for the minute must be the UNIQUE vehicles this minute
-            # Default to inline unique minute value if set; otherwise compute fallback and persist
-            unique_total_minute = self.get_unique_minute(period, direction, minute)
-            if unique_total_minute is None:
+            # Total volume for the minute must be UNIQUE vehicles this minute (split into stopped/notstopped)
+            unique_split = self.get_unique_minute(period, direction, minute)
+            if unique_split is None:
                 if self.current_unique_stopped is None or self.current_unique_notstopped is None:
-                    unique_total_minute = total_stopped + total_notstopped
+                    u_st = total_stopped
+                    u_ns = total_notstopped
                 else:
-                    unique_total_minute = max(0, int(self.current_unique_stopped)) + max(0, int(self.current_unique_notstopped))
-                self.set_unique_minute(period, direction, minute, unique_total_minute)
+                    u_st = max(0, int(self.current_unique_stopped))
+                    u_ns = max(0, int(self.current_unique_notstopped))
+                self.set_unique_minute(period, direction, minute, {"stopped": u_st, "notstopped": u_ns})
+                unique_split = {"stopped": u_st, "notstopped": u_ns}
+            unique_total_minute = unique_split["stopped"] + unique_split["notstopped"]
 
             # Create data tuple with all values including period, using unique total for 'Total Volume'
             entry_data = (
@@ -418,7 +426,11 @@ class DelayStudyApp:
         return self.unique_minute_map.get((period, direction, minute))
 
     def set_unique_minute(self, period, direction, minute, value):
-        self.unique_minute_map[(period, direction, minute)] = max(0, int(value))
+        # value is a dict {"stopped": int, "notstopped": int}
+        self.unique_minute_map[(period, direction, minute)] = {
+            "stopped": max(0, int(value.get("stopped", 0))),
+            "notstopped": max(0, int(value.get("notstopped", 0)))
+        }
 
     def load_unique_counter_for_current_context(self):
         try:
@@ -429,31 +441,48 @@ class DelayStudyApp:
             minute = 0
         direction = self.direction_var.get()
         v = self.get_unique_minute(period, direction, minute)
-        self.unique_minute_var.set(str(v) if v is not None else "0")
+        if v is None:
+            self.unique_minute_stopped_var.set("0")
+            self.unique_minute_notstopped_var.set("0")
+        else:
+            self.unique_minute_stopped_var.set(str(v.get("stopped", 0)))
+            self.unique_minute_notstopped_var.set(str(v.get("notstopped", 0)))
 
-    def increment_unique_minute(self):
-        try:
-            current = int(self.unique_minute_var.get())
-        except ValueError:
-            current = 0
-        new_val = current + 1
-        self.unique_minute_var.set(str(new_val))
+    def increment_unique_minute(self, is_stopped):
+        if is_stopped:
+            try:
+                current = int(self.unique_minute_stopped_var.get())
+            except ValueError:
+                current = 0
+            new_val = current + 1
+            self.unique_minute_stopped_var.set(str(new_val))
+        else:
+            try:
+                current = int(self.unique_minute_notstopped_var.get())
+            except ValueError:
+                current = 0
+            new_val = current + 1
+            self.unique_minute_notstopped_var.set(str(new_val))
         # Persist and aggregate
         period = int(self.period_var.get().split()[0])
         minute = int(self.minute_var.get())
         direction = self.direction_var.get()
-        self.set_unique_minute(period, direction, minute, new_val)
+        self.set_unique_minute(period, direction, minute, {
+            "stopped": int(self.unique_minute_stopped_var.get() or 0),
+            "notstopped": int(self.unique_minute_notstopped_var.get() or 0)
+        })
         self.recompute_unique_aggregates()
 
     def reset_unique_minute(self):
-        self.unique_minute_var.set("0")
+        self.unique_minute_stopped_var.set("0")
+        self.unique_minute_notstopped_var.set("0")
         try:
             period = int(self.period_var.get().split()[0])
             minute = int(self.minute_var.get())
         except Exception:
             return
         direction = self.direction_var.get()
-        self.set_unique_minute(period, direction, minute, 0)
+        self.set_unique_minute(period, direction, minute, {"stopped": 0, "notstopped": 0})
         self.recompute_unique_aggregates()
 
     def recompute_unique_aggregates(self):
@@ -462,8 +491,8 @@ class DelayStudyApp:
         for (p, d, m), val in self.unique_minute_map.items():
             if (p, d) not in agg:
                 agg[(p, d)] = {"stopped": 0, "notstopped": 0}
-            # We only track total unique; store in notstopped bucket to keep structure
-            agg[(p, d)]["notstopped"] += int(val)
+            agg[(p, d)]["stopped"] += int(val.get("stopped", 0))
+            agg[(p, d)]["notstopped"] += int(val.get("notstopped", 0))
         self.unique_map = agg
         # Keep approach_volume in sync for compatibility and display
         self.approach_volume = {k: v["stopped"] + v["notstopped"] for k, v in self.unique_map.items()}

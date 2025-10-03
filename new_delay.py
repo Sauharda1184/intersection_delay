@@ -713,15 +713,35 @@ class DelayStudyApp:
                 filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("All files", "*.*")]
             )
             if filename:
-                # Create DataFrame from collected data
+                # Create DataFrame from collected data, but override totals with UNIQUE split
                 columns = [
                     "Period", "Minute", "Direction",
                     "Stopped +0s", "Stopped +15s", "Stopped +30s", "Stopped +45s", "Total Stopped",
                     "Not Stopped +0s", "Not Stopped +15s", "Not Stopped +30s", "Not Stopped +45s",
                     "Total Not Stopped", "Total Volume"
                 ]
-                
-                df = pd.DataFrame(self.data, columns=columns)
+                # Rebuild rows to ensure Total Stopped / Total Not Stopped are unique per minute
+                rebuilt_rows = []
+                for row in self.data:
+                    period = row[0]
+                    minute = row[1]
+                    direction = row[2]
+                    # Unique split for this minute
+                    usplit = self.unique_minute_map.get((period, direction, minute))
+                    if usplit is None:
+                        # Fallback to original totals if unique not present
+                        u_st = row[7]
+                        u_ns = row[12]
+                    else:
+                        u_st = int(usplit.get("stopped", 0))
+                        u_ns = int(usplit.get("notstopped", 0))
+                    u_total = u_st + u_ns
+                    rebuilt_rows.append([
+                        period, minute, direction,
+                        row[3], row[4], row[5], row[6], u_st,
+                        row[8], row[9], row[10], row[11], u_ns, u_total
+                    ])
+                df = pd.DataFrame(rebuilt_rows, columns=columns)
                 
                 if filename.endswith('.xlsx'):
                     # Add study information at the top
@@ -757,7 +777,7 @@ class DelayStudyApp:
                         writer.writerow(["Weather:", self.weather_var.get()])
                         writer.writerow([])
                         writer.writerow(columns)
-                        for row in self.data:
+                        for row in rebuilt_rows:
                             writer.writerow(row)
                 
                 messagebox.showinfo("Success", f"Data saved successfully to {filename}")

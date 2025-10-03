@@ -303,11 +303,11 @@ class DelayStudyApp:
                 unique_split = {"stopped": u_st, "notstopped": u_ns}
             unique_total_minute = unique_split["stopped"] + unique_split["notstopped"]
 
-            # Create data tuple with all values including period, using unique total for 'Total Volume'
+            # Create data tuple with all values including period, using unique totals for 'Total Stopped' and 'Total Volume'
             entry_data = (
                 period, minute, direction, 
-                *stopped_counts, total_stopped,
-                *notstopped_counts, total_notstopped,
+                *stopped_counts, unique_split["stopped"],
+                *notstopped_counts, unique_split["notstopped"],
                 unique_total_minute
             )
             self.data.append(entry_data)

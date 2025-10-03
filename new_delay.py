@@ -519,7 +519,11 @@ class DelayStudyApp:
             # Aggregate period totals across directions
             period_rows = [d for d in self.data if d[0] == period]
             if period_rows:
-                p_total_stopped = sum(d[7] for d in period_rows)
+                # Use UNIQUE stopped totals aggregated across directions for this period
+                p_total_stopped = 0
+                for direction in ["North", "South", "East", "West"]:
+                    u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                    p_total_stopped += u["stopped"]
                 # Approach volume for period = sum of unique per direction for this period
                 p_total_vehicles = 0
                 for direction in ["North", "South", "East", "West"]:
@@ -542,9 +546,9 @@ class DelayStudyApp:
                 # Filter data for this period and direction (period is now index 0, direction is index 2)
                 period_direction_data = [d for d in self.data if d[0] == period and d[2] == direction]
                 if period_direction_data:
-                    total_stopped = sum(d[7] for d in period_direction_data)  # Index 7 is total_stopped
-                    # Unique approach volume for this period+direction
+                    # Use UNIQUE stopped and UNIQUE approach volume for this period+direction
                     u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                    total_stopped = u["stopped"]
                     total_vehicles = u["stopped"] + u["notstopped"]
                     
                     if total_vehicles > 0:
@@ -566,11 +570,12 @@ class DelayStudyApp:
         for direction in ["North", "South", "East", "West"]:
             direction_data = [d for d in self.data if d[2] == direction]
             if direction_data:
-                total_stopped = sum(d[7] for d in direction_data)  # Index 7 is total_stopped
-                # Unique approach volume overall for direction across all periods
+                # Use UNIQUE stopped and UNIQUE approach volume overall for direction across all periods
+                total_stopped = 0
                 total_vehicles = 0
                 for period in range(1, 5):
                     u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                    total_stopped += u["stopped"]
                     total_vehicles += (u["stopped"] + u["notstopped"])
                 
                 if total_vehicles > 0:
@@ -981,8 +986,12 @@ class Form2Window:
 
     def calculate_form2_results(self):
         """Calculate and display Form 2 results."""
-        # Aggregate using unique approach volume for correctness with formulas
-        total_stopped = sum(row[7] for row in self.data)
+        # Aggregate using UNIQUE stopped and UNIQUE approach volume for correctness
+        total_stopped = 0
+        for period in range(1, 5):
+            for direction in ["North", "South", "East", "West"]:
+                u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                total_stopped += u["stopped"]
         total_vehicles = 0
         for period in range(1, 5):
             for direction in ["North", "South", "East", "West"]:

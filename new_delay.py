@@ -50,6 +50,21 @@ class DelayStudyApp:
         weather_entry = ttk.Entry(info_frame, textvariable=self.weather_var, width=12)
         weather_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
+        # Start Time
+        self.start_hour_var = tk.StringVar(value="08")
+        self.start_minute_var = tk.StringVar(value="00")
+        self.start_second_var = tk.StringVar(value="00")
+        start_time_label = ttk.Label(info_frame, text="Start Time:")
+        start_time_label.grid(row=1, column=2, padx=5, pady=5, sticky="e")
+        start_hour_entry = ttk.Entry(info_frame, textvariable=self.start_hour_var, width=3)
+        start_hour_entry.grid(row=1, column=3, padx=2, pady=5, sticky="w")
+        ttk.Label(info_frame, text=":").grid(row=1, column=4, padx=0, pady=5)
+        start_minute_entry = ttk.Entry(info_frame, textvariable=self.start_minute_var, width=3)
+        start_minute_entry.grid(row=1, column=5, padx=2, pady=5, sticky="w")
+        ttk.Label(info_frame, text=":").grid(row=1, column=6, padx=0, pady=5)
+        start_second_entry = ttk.Entry(info_frame, textvariable=self.start_second_var, width=3)
+        start_second_entry.grid(row=1, column=7, padx=2, pady=5, sticky="w")
+
         # --- Input Frame ---
         input_frame = ttk.LabelFrame(root, text="Vehicle Count Data Entry")
         input_frame.pack(fill="x", padx=10, pady=5)
@@ -70,7 +85,7 @@ class DelayStudyApp:
         # Current minute within period
         minute_label = ttk.Label(time_dir_frame, text="Minute in Period:")
         minute_label.pack(side="left", padx=5)
-        self.minute_var = tk.StringVar(value="0")
+        self.minute_var = tk.StringVar(value="1")
         self.minute_entry = ttk.Entry(time_dir_frame, textvariable=self.minute_var, width=8, state="readonly")
         self.minute_entry.pack(side="left", padx=5)
 
@@ -96,7 +111,7 @@ class DelayStudyApp:
 
         # Initialize variables for interval counts
         self.interval_vars = []
-        interval_labels = ["+0 sec", "+15 sec", "+30 sec", "+45 sec"]
+        interval_labels = ["0-15 sec", "15-30 sec", "30-45 sec", "45-60 sec"]
         
         for i, label in enumerate(interval_labels):
             interval_frame = ttk.Frame(stopped_frame)
@@ -200,18 +215,18 @@ class DelayStudyApp:
         
         # Configure headers and columns
         headers = {
-            "period": "Period",
+            "period": "Interval",
             "minute": "Minute",
             "direction": "Direction",
-            "stopped_0": "Stopped +0s",
-            "stopped_15": "Stopped +15s",
-            "stopped_30": "Stopped +30s",
-            "stopped_45": "Stopped +45s",
+            "stopped_0": "Stopped 0-15s",
+            "stopped_15": "Stopped 15-30s",
+            "stopped_30": "Stopped 30-45s",
+            "stopped_45": "Stopped 45-60s",
             "total_stopped": "Total Stopped",
-            "notstopped_0": "Not Stopped +0s",
-            "notstopped_15": "Not Stopped +15s",
-            "notstopped_30": "Not Stopped +30s",
-            "notstopped_45": "Not Stopped +45s",
+            "notstopped_0": "Not Stopped 0-15s",
+            "notstopped_15": "Not Stopped 15-30s",
+            "notstopped_30": "Not Stopped 30-45s",
+            "notstopped_45": "Not Stopped 45-60s",
             "total_notstopped": "Total Not Stopped",
             "total": "Total Volume"
         }
@@ -235,6 +250,25 @@ class DelayStudyApp:
                   command=self.save_data).pack(side="left", padx=5)
         ttk.Button(action_frame, text="Clear All Data", 
                   command=self.clear_data).pack(side="left", padx=5)
+
+    def calculate_actual_time(self, period, minute):
+        """Calculate actual time based on start time, period, and minute."""
+        try:
+            start_hour = int(self.start_hour_var.get())
+            start_minute = int(self.start_minute_var.get())
+            start_second = int(self.start_second_var.get())
+            
+            # Calculate total minutes from start
+            total_minutes = (period - 1) * 15 + (minute - 1)
+            
+            # Add to start time
+            current_minute = start_minute + total_minutes
+            current_hour = start_hour + (current_minute // 60)
+            current_minute = current_minute % 60
+            
+            return f"{current_hour:02d}:{current_minute:02d}:{start_second:02d}"
+        except ValueError:
+            return "00:00:00"
 
     def increment_count(self, var):
         try:
@@ -260,7 +294,7 @@ class DelayStudyApp:
     def next_minute(self):
         """Automatically progress to the next minute within the current period."""
         current_minute = int(self.minute_var.get())
-        if current_minute < 14:  # 0-14 minutes in each 15-minute period
+        if current_minute < 15:  # 1-15 minutes in each 15-minute period
             self.minute_var.set(str(current_minute + 1))
             # Load unique counter for new minute
             self.load_unique_counter_for_current_context()
@@ -270,7 +304,7 @@ class DelayStudyApp:
             if current_period < 4:
                 next_period = current_period + 1
                 self.period_var.set(f"{next_period} ({15*(next_period-1)}-{15*next_period} min)")
-                self.minute_var.set("0")
+                self.minute_var.set("1")
                 # Reset tally display for new period; load if previously saved
                 self.on_period_or_direction_change()
             else:
@@ -441,7 +475,7 @@ class DelayStudyApp:
             minute = int(self.minute_var.get())
         except Exception:
             period = 1
-            minute = 0
+            minute = 1
         direction = self.direction_var.get()
         v = self.get_unique_minute(period, direction, minute)
         if v is None:
@@ -723,9 +757,9 @@ class DelayStudyApp:
             if filename:
                 # Create DataFrame from collected data, but override totals with UNIQUE split
                 columns = [
-                    "Period", "Minute", "Direction",
-                    "Stopped +0s", "Stopped +15s", "Stopped +30s", "Stopped +45s", "Total Stopped",
-                    "Not Stopped +0s", "Not Stopped +15s", "Not Stopped +30s", "Not Stopped +45s",
+                    "Time", "Interval", "Minute", "Direction",
+                    "Stopped 0-15s", "Stopped 15-30s", "Stopped 30-45s", "Stopped 45-60s", "Total Stopped",
+                    "Not Stopped 0-15s", "Not Stopped 15-30s", "Not Stopped 30-45s", "Not Stopped 45-60s",
                     "Total Not Stopped", "Total Volume"
                 ]
                 # Rebuild rows to ensure Total Stopped / Total Not Stopped are unique per minute
@@ -734,6 +768,8 @@ class DelayStudyApp:
                     period = row[0]
                     minute = row[1]
                     direction = row[2]
+                    # Calculate actual time
+                    actual_time = self.calculate_actual_time(period, minute)
                     # Unique split for this minute
                     usplit = self.unique_minute_map.get((period, direction, minute))
                     if usplit is None:
@@ -745,7 +781,7 @@ class DelayStudyApp:
                         u_ns = int(usplit.get("notstopped", 0))
                     u_total = u_st + u_ns
                     rebuilt_rows.append([
-                        period, minute, direction,
+                        actual_time, period, minute, direction,
                         row[3], row[4], row[5], row[6], u_st,
                         row[8], row[9], row[10], row[11], u_ns, u_total
                     ])
@@ -758,6 +794,7 @@ class DelayStudyApp:
                         ["Date:", self.date_var.get()],
                         ["Intersection:", self.intersection_var.get()],
                         ["Weather:", self.weather_var.get()],
+                        ["Start Time:", f"{self.start_hour_var.get()}:{self.start_minute_var.get()}:{self.start_second_var.get()}"],
                         [""]
                     ])
                     
@@ -783,6 +820,7 @@ class DelayStudyApp:
                         writer.writerow(["Date:", self.date_var.get()])
                         writer.writerow(["Intersection:", self.intersection_var.get()])
                         writer.writerow(["Weather:", self.weather_var.get()])
+                        writer.writerow(["Start Time:", f"{self.start_hour_var.get()}:{self.start_minute_var.get()}:{self.start_second_var.get()}"])
                         writer.writerow([])
                         writer.writerow(columns)
                         for row in rebuilt_rows:
@@ -799,7 +837,7 @@ class DelayStudyApp:
             for row in self.tree.get_children():
                 self.tree.delete(row)
             self.period_var.set("1 (0-15 min)")
-            self.minute_var.set("0")
+            self.minute_var.set("1")
             self.reset_counts()
             self.approach_volume.clear()
             self.approach_volume_var.set("0")
@@ -906,7 +944,7 @@ class Form2Window:
         
         # Configure headers
         headers = {
-            "period": "Period",
+            "period": "Interval",
             "time_range": "Time Range",
             "direction": "Direction",
             "total_stopped": "Total Stopped",
@@ -1074,7 +1112,7 @@ Period {period} ({15*(period-1):02d}:00-{15*period:02d}:00):
                     form2_data.append(values)
                 
                 # Create DataFrame
-                columns = ["Period", "Time Range", "Direction", "Total Stopped", "Total Not Stopped", "Total Volume", "Observed Stopped (unique)", "Observed Not Stopped (unique)", "Observed Volume (unique)"]
+                columns = ["Interval", "Time Range", "Direction", "Total Stopped", "Total Not Stopped", "Total Volume", "Observed Stopped (unique)", "Observed Not Stopped (unique)", "Observed Volume (unique)"]
                 df = pd.DataFrame(form2_data, columns=columns)
                 
                 # Write to Excel

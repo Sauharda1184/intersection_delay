@@ -577,17 +577,18 @@ class DelayStudyApp:
                     p_total_vehicles += (u["stopped"] + u["notstopped"])
                 
                 if p_total_vehicles > 0:
-                    # Total Delay = Total Number Stopped at Time Intervals * 15 seconds
+                    # Total Delay = Total Number Stopped (not unique) * 15 seconds
                     p_total_delay = p_total_stopped_all_intervals * 15
-                    # Average Delay per Stopped Vehicle = Total Delay / Number Stopped (total stopped, not unique)
-                    p_avg_delay_stopped = p_total_delay / p_total_stopped_all_intervals if p_total_stopped_all_intervals > 0 else 0
-                    # Average Delay per Approach Vehicle = Total Delay / Total Approach Volume (unique vehicles)
+                    # Average Delay per Stopped Vehicle = Total Delay / Number Stopped (Unique)
+                    p_avg_delay_stopped = p_total_delay / p_total_stopped_unique if p_total_stopped_unique > 0 else 0
+                    # Average Delay per Approach Vehicle = Total Delay / Total Approach Volume
                     p_avg_delay_approach = p_total_delay / p_total_vehicles
-                    # Percent of Vehicles Stopped = Number Stopped (total) / Approach Volume (unique)
-                    p_percent_stopped = (p_total_stopped_all_intervals / p_total_vehicles) * 100
+                    # Percent of Vehicles Stopped = Number Stopped (Unique) / Approach Volume
+                    p_percent_stopped = (p_total_stopped_unique / p_total_vehicles) * 100
                     results_by_period_overall[period] = {
                         "Total Vehicles": p_total_vehicles,
                         "Total Stopped": p_total_stopped_all_intervals,
+                        "Total Stopped Unique": p_total_stopped_unique,
                         "Total Delay (sec)": p_total_delay,
                         "Avg Delay per Stopped (sec)": p_avg_delay_stopped,
                         "Avg Delay per Approach (sec)": p_avg_delay_approach,
@@ -608,18 +609,19 @@ class DelayStudyApp:
                     total_vehicles = u["stopped"] + u["notstopped"]
                     
                     if total_vehicles > 0:
-                        # Total Delay = Total Number Stopped at Time Intervals * 15 seconds
+                        # Total Delay = Total Number Stopped (not unique) * 15 seconds
                         total_delay = total_stopped_all_intervals * 15
-                        # Average Delay per Stopped Vehicle = Total Delay / Number Stopped (total stopped, not unique)
-                        avg_delay_stopped = total_delay / total_stopped_all_intervals if total_stopped_all_intervals > 0 else 0
-                        # Average Delay per Approach Vehicle = Total Delay / Total Approach Volume (unique vehicles)
+                        # Average Delay per Stopped Vehicle = Total Delay / Number Stopped (Unique)
+                        avg_delay_stopped = total_delay / u["stopped"] if u["stopped"] > 0 else 0
+                        # Average Delay per Approach Vehicle = Total Delay / Total Approach Volume
                         avg_delay_approach = total_delay / total_vehicles
-                        # Percent of Vehicles Stopped = Number Stopped (total) / Approach Volume (unique)
-                        percent_stopped = (total_stopped_all_intervals / total_vehicles) * 100
+                        # Percent of Vehicles Stopped = Number Stopped (Unique) / Approach Volume
+                        percent_stopped = (u["stopped"] / total_vehicles) * 100
                         
                         results_by_period_direction[period][direction] = {
                             "Total Vehicles": total_vehicles,
                             "Total Stopped": total_stopped_all_intervals,
+                            "Total Stopped Unique": u["stopped"],
                             "Total Delay (sec)": total_delay,
                             "Avg Delay per Stopped (sec)": avg_delay_stopped,
                             "Avg Delay per Approach (sec)": avg_delay_approach,
@@ -638,23 +640,26 @@ class DelayStudyApp:
                 
                 # Use UNIQUE stopped and UNIQUE approach volume overall for direction across all periods
                 total_vehicles = 0
+                total_stopped_unique = 0
                 for period in range(1, 5):
                     u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
                     total_vehicles += (u["stopped"] + u["notstopped"])
+                    total_stopped_unique += u["stopped"]
                 
                 if total_vehicles > 0:
-                    # Total Delay = Total Number Stopped at Time Intervals * 15 seconds
+                    # Total Delay = Total Number Stopped (not unique) * 15 seconds
                     total_delay = total_stopped_all_intervals * 15
-                    # Average Delay per Stopped Vehicle = Total Delay / Number Stopped (total stopped, not unique)
-                    avg_delay_stopped = total_delay / total_stopped_all_intervals if total_stopped_all_intervals > 0 else 0
-                    # Average Delay per Approach Vehicle = Total Delay / Total Approach Volume (unique vehicles)
+                    # Average Delay per Stopped Vehicle = Total Delay / Number Stopped (Unique)
+                    avg_delay_stopped = total_delay / total_stopped_unique if total_stopped_unique > 0 else 0
+                    # Average Delay per Approach Vehicle = Total Delay / Total Approach Volume
                     avg_delay_approach = total_delay / total_vehicles
-                    # Percent of Vehicles Stopped = Number Stopped (total) / Approach Volume (unique)
-                    percent_stopped = (total_stopped_all_intervals / total_vehicles) * 100
+                    # Percent of Vehicles Stopped = Number Stopped (Unique) / Approach Volume
+                    percent_stopped = (total_stopped_unique / total_vehicles) * 100
                     
                     overall_results_by_direction[direction] = {
                         "Total Vehicles": total_vehicles,
                         "Total Stopped": total_stopped_all_intervals,
+                        "Total Stopped Unique": total_stopped_unique,
                         "Total Delay (sec)": total_delay,
                         "Avg Delay per Stopped (sec)": avg_delay_stopped,
                         "Avg Delay per Approach (sec)": avg_delay_approach,
@@ -748,7 +753,8 @@ class DelayStudyApp:
         for direction, data in overall_results_by_direction.items():
             results += f"\n{direction} Approach:\n"
             results += f"Total Vehicles: {data['Total Vehicles']}\n"
-            results += f"Total Stopped: {data['Total Stopped']}\n"
+            results += f"Total Stopped (all intervals): {data['Total Stopped']}\n"
+            results += f"Total Stopped (unique): {data['Total Stopped Unique']}\n"
             results += f"Total Delay: {data['Total Delay (sec)']:.1f} seconds\n"
             results += f"Avg Delay per Stopped Vehicle: {data['Avg Delay per Stopped (sec)']:.1f} seconds\n"
             results += f"Avg Delay per Approach Vehicle: {data['Avg Delay per Approach (sec)']:.1f} seconds\n"
@@ -760,7 +766,8 @@ class DelayStudyApp:
             results += f"\nPeriod {period} ({15*(period-1)}-{15*period} minutes):\n"
             for direction, data in results_by_period_direction[period].items():
                 results += f"  {direction}: {data['Total Vehicles']} vehicles, "
-                results += f"{data['Total Stopped']} stopped, "
+                results += f"{data['Total Stopped']} stopped (all intervals), "
+                results += f"{data['Total Stopped Unique']} stopped (unique), "
                 results += f"{data['Avg Delay per Approach (sec)']:.1f}s avg delay\n"
 
         # Period Summaries (all directions combined)
@@ -768,8 +775,9 @@ class DelayStudyApp:
         for period in sorted(results_by_period_overall.keys()):
             data = results_by_period_overall[period]
             results += (
-                f"Period {period}: total={data['Total Vehicles']}, stopped={data['Total Stopped']}, "
-                f"delay={data['Total Delay (sec)']:.0f}s, avgStopped={data['Avg Delay per Stopped (sec)']:.1f}s, "
+                f"Period {period}: total={data['Total Vehicles']}, stopped={data['Total Stopped']} (all intervals), "
+                f"stopped_unique={data['Total Stopped Unique']}, delay={data['Total Delay (sec)']:.0f}s, "
+                f"avgStopped={data['Avg Delay per Stopped (sec)']:.1f}s, "
                 f"avgApproach={data['Avg Delay per Approach (sec)']:.1f}s, %stopped={data['Percent Stopped']:.1f}%\n"
             )
 
@@ -789,7 +797,7 @@ class DelayStudyApp:
                 # Create DataFrame from collected data, but override totals with UNIQUE split
                 columns = [
                     "Time", "Interval", "Minute", "Direction",
-                    "Stopped 0-15s", "Stopped 15-30s", "Stopped 30-45s", "Stopped 45-60s", "Total Stopped",
+                    "Stopped 0-15s", "Stopped 15-30s", "Stopped 30-45s", "Stopped 45-60s", "Total Stopped", "Total Stopped Unique",
                     "Not Stopped 0-15s", "Not Stopped 15-30s", "Not Stopped 30-45s", "Not Stopped 45-60s",
                     "Total Not Stopped", "Total Volume"
                 ]
@@ -801,6 +809,8 @@ class DelayStudyApp:
                     direction = row[2]
                     # Calculate actual time
                     actual_time = self.calculate_actual_time(period, minute)
+                    # Calculate total stopped (sum of all intervals)
+                    total_stopped_all_intervals = sum(row[3:7])  # indices 3-6 are stopped counts
                     # Unique split for this minute
                     usplit = self.unique_minute_map.get((period, direction, minute))
                     if usplit is None:
@@ -813,7 +823,7 @@ class DelayStudyApp:
                     u_total = u_st + u_ns
                     rebuilt_rows.append([
                         actual_time, period, minute, direction,
-                        row[3], row[4], row[5], row[6], u_st,
+                        row[3], row[4], row[5], row[6], total_stopped_all_intervals, u_st,
                         row[8], row[9], row[10], row[11], u_ns, u_total
                     ])
                 df = pd.DataFrame(rebuilt_rows, columns=columns)
@@ -1066,21 +1076,23 @@ class Form2Window:
         
         # Calculate total unique vehicles (approach volume) across all periods and directions
         total_vehicles = 0
+        total_stopped_unique = 0
         for period in range(1, 5):
             for direction in ["North", "South", "East", "West"]:
                 u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
                 total_vehicles += (u["stopped"] + u["notstopped"])
+                total_stopped_unique += u["stopped"]
         
         # Calculate metrics
-        # Total Delay = Total Number Stopped at Time Intervals * 15 seconds
+        # Total Delay = Total Number Stopped (not unique) * 15 seconds
         total_delay_seconds = total_stopped_all_intervals * 15
         total_delay_hours = total_delay_seconds / 3600
-        # Average Delay per Stopped Vehicle = Total Delay / Number Stopped (total stopped, not unique)
-        avg_delay_stopped = total_delay_seconds / total_stopped_all_intervals if total_stopped_all_intervals > 0 else 0
-        # Average Delay per Approach Vehicle = Total Delay / Total Approach Volume (unique vehicles)
+        # Average Delay per Stopped Vehicle = Total Delay / Number Stopped (Unique)
+        avg_delay_stopped = total_delay_seconds / total_stopped_unique if total_stopped_unique > 0 else 0
+        # Average Delay per Approach Vehicle = Total Delay / Total Approach Volume
         avg_delay_approach = total_delay_seconds / total_vehicles if total_vehicles > 0 else 0
-        # Percent of Vehicles Stopped = Number Stopped (total) / Approach Volume (unique)
-        percent_stopped = (total_stopped_all_intervals / total_vehicles * 100) if total_vehicles > 0 else 0
+        # Percent of Vehicles Stopped = Number Stopped (Unique) / Approach Volume
+        percent_stopped = (total_stopped_unique / total_vehicles * 100) if total_vehicles > 0 else 0
         
         # Format results
         results = f"""FORM 2 CALCULATED RESULTS
@@ -1095,8 +1107,9 @@ Percent of Vehicles Stopped: {percent_stopped:.2f}%
 STUDY SUMMARY
 {'='*50}
 Total Vehicles Observed: {total_vehicles}
-Total Vehicles Stopped: {total_stopped_all_intervals}
-Total Vehicles Not Stopped: {max(total_vehicles - total_stopped_all_intervals, 0)}
+Total Vehicles Stopped (all intervals): {total_stopped_all_intervals}
+Total Vehicles Stopped (unique): {total_stopped_unique}
+Total Vehicles Not Stopped: {max(total_vehicles - total_stopped_unique, 0)}
 Study Duration: 60 minutes (4 x 15-minute periods)
 Sampling Interval: 15 seconds
 
@@ -1108,12 +1121,21 @@ PERIOD BREAKDOWN
         for row in self.data:
             period = row[0]
             if period not in period_data:
-                period_data[period] = {"stopped_all_intervals": 0}
+                period_data[period] = {"stopped_all_intervals": 0, "stopped_unique": 0}
             # Sum all stopped counts: stopped_0 + stopped_15 + stopped_30 + stopped_45
             period_data[period]["stopped_all_intervals"] += sum(row[3:7])  # indices 3-6 are stopped counts
         
+        # Calculate unique stopped totals per period
+        for period in range(1, 5):
+            if period not in period_data:
+                period_data[period] = {"stopped_all_intervals": 0, "stopped_unique": 0}
+            for direction in ["North", "South", "East", "West"]:
+                u = self.unique_map.get((period, direction), {"stopped": 0, "notstopped": 0})
+                period_data[period]["stopped_unique"] += u["stopped"]
+        
         for period in sorted(period_data.keys()):
             stopped_all_intervals = period_data[period]["stopped_all_intervals"]
+            stopped_unique = period_data[period]["stopped_unique"]
             # unique total approach volume for this period across all directions
             total = 0
             for direction in ["North", "South", "East", "West"]:
@@ -1125,8 +1147,9 @@ PERIOD BREAKDOWN
             results += f"""
 Period {period} ({15*(period-1):02d}:00-{15*period:02d}:00):
   Total Vehicles: {total}
-  Stopped: {stopped_all_intervals}
-  Not Stopped: {max(total - stopped_all_intervals, 0)}
+  Stopped (all intervals): {stopped_all_intervals}
+  Stopped (unique): {stopped_unique}
+  Not Stopped: {max(total - stopped_unique, 0)}
   Total Delay: {period_delay} vehicle-seconds
   Average Delay: {period_avg_delay:.2f} seconds/vehicle"""
         

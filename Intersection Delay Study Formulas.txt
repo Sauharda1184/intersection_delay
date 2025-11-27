@@ -1,0 +1,10 @@
+Intersection Delay Study Formulas:
+
+Total Delay = Total Number Stopped ( not unique ) * 15 
+
+Avg Delay per Stopped Vehicle = Total Delay * Number Stopped ( Unique )
+
+Avg Delay per Approach Vehicle = Total Delay divided by Total Approach Volume 
+
+Percent of Vehicles Stopped = Number Stopped ( Unique ) divided by Approach Volume 
+
